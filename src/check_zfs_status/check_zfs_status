@@ -1,0 +1,99 @@
+#!/bin/sh
+#
+# Copyright (C) 2009 by Tomoyuki Sakurai <cherry@trombik.org>
+# 
+# Permission to use, copy, modify, and distribute this software for any
+# purpose with or without fee is hereby granted, provided that the above
+# copyright notice and this permission notice appear in all copies.
+#                                                                                            
+# THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+# WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+# ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+# WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+# ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+# OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin
+MYNAME=$( basename $0 )
+SERVICE_NAME="ZFS_STATUS"
+PLUGINS_DIR=$( dirname $0 )
+
+usage() {
+    echo "Usage:
+    ${MYNAME} [-p pool1,pool2[, ...]]
+
+    -p comma-separated list of pools to check
+
+    without -p, ${MYNAME} checks all pools found by zpool list.
+    when the pool is in older format, ${MYNAME} returns OK status.
+
+" >/dev/stderr
+}
+
+if [ -r ${PLUGINS_DIR}/utils.sh ]; then
+    . ${PLUGINS_DIR}/utils.sh
+else
+    # XXX cannot use pre-defined ${ECHO}
+    echo "${SERVICE_NAME} UNKNOWN cannot find utils.sh in ${PLUGINS_DIR}"
+    echo "make sure ${MYNAME} is in Nagios plugins dir."
+    usage
+    exit 3
+fi
+
+# check_pool $zpool_name
+# exit with non-OK status or store (healthy) status line in the global STATUS.
+check_pool() {
+    local pool=$1
+    local status="$( zpool status -x ${pool} 2>/dev/null )"
+    local ret=$?
+
+    if [ ${ret} -ne 0 ]; then
+    fi
+
+    # zpool status -x always exits with 0, so we have to interpret its
+    # output to see what's going on.
+    # pool 'tank' is healthy
+    if [ "$status" = "pool '${pool}' is healthy" ]; then
+        RETURN_STATUS=0
+    else
+        if ${ECHO} "$status" | grep -sq "state: ONLINE"; then
+            RETURN_STATUS=0
+        else
+            RETURN_STATUS=1
+        fi
+    fi
+
+    if [ ${RETURN_STATUS} -ne 0 ]; then
+        ${ECHO} "${SERVICE_NAME} CRITICAL ${pool} is not healthy, ${status}"
+        # bail out if one of the pools is not in OK status
+        exit ${STATE_CRITICAL}
+    else
+        # in case of "older on-disk format", the output is multi-line
+        status="$( ${ECHO} "${status}" | head -n 1)"
+        if [ -z "${STATUS}" ]; then
+            STATUS="${status}"
+        else
+            STATUS="${STATUS} ${status}"
+        fi
+    fi
+}
+
+while getopts :hp: ARG; do case ${ARG} in
+    # comma-separated list of pools
+    p) POOLS=${OPTARG};;
+    h) usage; exit ${STATE_UNKNOWN};;
+esac; done; shift $(( $OPTIND - 1 ))
+
+if [ -z "${POOLS}" ]; then
+    POOLS=$( zpool list -H -o name 2>/dev/null )
+else
+    POOLS=$( echo "${POOLS}" | tr "," "\n" )
+fi
+
+STATUS=""
+for P in ${POOLS}; do
+    check_pool "${P}"
+done
+${ECHO} "${SERVICE_NAME} OK ${STATUS}"
+exit ${STATE_OK}

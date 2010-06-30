@@ -1,0 +1,123 @@
+#!/bin/sh
+#
+# Copyright (C) 2009 by Tomoyuki Sakurai <cherry@trombik.org>
+# 
+# Permission to use, copy, modify, and distribute this software for any
+# purpose with or without fee is hereby granted, provided that the above
+# copyright notice and this permission notice appear in all copies.
+#                                                                                            
+# THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+# WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+# ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+# WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+# ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+# OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin
+MYNAME=$( basename $0 )
+SERVICE_NAME="IF_CARP"
+PLUGINS_DIR=$( dirname $0 )
+
+usage() {
+    echo "Usage:
+" >/dev/stderr
+}
+
+mylog() {
+    local text="$1"
+    if [ ! -z ${VERBOSE} ]; then
+        ${ECHO} -- "${text}" >/dev/stderr
+    fi
+}
+
+if [ -r ${PLUGINS_DIR}/utils.sh ]; then
+    . ${PLUGINS_DIR}/utils.sh
+else
+    echo "${SERVICE_NAME} UNKNOWN cannot find utils.sh in ${PLUGINS_DIR}"
+    echo "make sure ${MYNAME} is in Nagios plugins dir."
+    usage
+    exit 3
+fi
+
+do_check() {
+    local out=""
+
+    out=$( ifconfig "${INTERFACE}" | grep carp: )
+    mylog "ifconfig output: ${out}"
+    if [ -z out ]; then
+        STATUS_CODE=${STATE_CRITICAL}
+        STATUS_TEXT="ifconfig ${INTERFACE} returned null"
+        return
+    fi
+
+    # XXX OpenBSD?
+    local carp_state=$( echo "${out}" | cut -f2 -d " " | tr "[:upper:]" "[:lower:]" )
+    mylog "carp state is ${carp_state}"
+
+    if [ -z ${carp_state} ]; then
+        STATUS_CODE=${STATE_UNKNOWN}
+        STATUS_TEXT="cannot determine carp state"
+        return
+    fi
+    if [ ${carp_state} = "init" ]; then
+        STATUS_CODE=${STATE_CRITICAL}
+        STATUS_TEXT="interface ${INTERFACE} is in INIT state"
+        return
+    fi
+    if [ ${carp_state} != ${NORMAL_STATE} ]; then
+        STATUS_CODE=${STATE_CRITICAL}
+        STATUS_TEXT="interface ${INTERFACE} is in ${carp_state} state, should be ${NORMAL_STATE}"
+        return
+    else
+        STATUS_CODE=${STATE_OK}
+        STATUS_TEXT="interface ${INTERFACE} is in ${carp_state} state"
+        return
+    fi
+}
+
+HOST=""
+STATUS_CODE=""
+STATUS_TEXT=""
+INTERFACE=""
+INTERFACE_NUMBER=""
+while getopts :hH:i:s: ARG; do case ${ARG} in
+    H) HOST=${OPTARG} ;;
+    i) INTERFACE=${OPTARG} ;;
+    s) NORMAL_STATE=$( echo ${OPTARG} | tr "[:upper:]" "[:lower:]" ) ;;
+    v) VERBOSE=y ;;
+    h) usage; exit ${STATE_UNKNOWN};;
+esac; done; shift $(( $OPTIND - 1 ))
+
+if [ -z ${INTERFACE} ]; then
+    ${ECHO} "${SERVICE_NAME} UNKNOWN missing -i option"
+    exit ${STATE_UNKNOWN}
+fi
+if [ -z ${NORMAL_STATE} ]; then
+    ${ECHO} "${SERVICE_NAME} UNKNOWN missing -s option"
+    exit ${STATE_UNKNOWN}
+fi
+if [ ${NORMAL_STATE} != "master" -a ${NORMAL_STATE} != "backup" ]; then
+    ${ECHO} "${SERVICE_NAME} UNKNOWN unknown status given"
+    exit ${STATE_UNKNOWN}
+fi
+
+# sercice name must be unique
+INTERFACE_NUMBER=$( echo ${INTERFACE} | sed -e "s/carp//" )
+if [ -z ${INTERFACE_NUMBER} ]; then
+    ${ECHO} "${SERVICE_NAME} UNKNOWN cannot determine interface number?!"
+    exit ${STATE_UNKNOWN}
+fi
+SERVICE_NAME="${SERVICE_NAME}${INTERFACE_NUMBER}"
+
+do_check
+
+case ${STATUS_CODE} in
+    ${STATE_UNKNOWN}) STATUS="UNKNOWN";;
+    ${STATE_CRITICAL}) STATUS="CRITICAL";;
+    ${STATE_WARNING}) STATUS="WARNING";;
+    ${STATE_OK}) STATUS="OK";;
+esac
+
+${ECHO} "${SERVICE_NAME} ${STATUS} ${STATUS_TEXT}"
+exit ${STATUS_CODE}

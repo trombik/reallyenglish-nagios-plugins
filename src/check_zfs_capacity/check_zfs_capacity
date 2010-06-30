@@ -1,0 +1,99 @@
+#!/bin/sh
+#
+# Copyright (C) 2009 by Tomoyuki Sakurai <cherry@trombik.org>
+# 
+# Permission to use, copy, modify, and distribute this software for any
+# purpose with or without fee is hereby granted, provided that the above
+# copyright notice and this permission notice appear in all copies.
+#                                                                                            
+# THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+# WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+# ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+# WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+# ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+# OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin
+MYNAME=$( basename $0 )
+SERVICE_NAME="ZFS_CAPACITY"
+PLUGINS_DIR=$( dirname $0 )
+
+usage() {
+    echo "Usage:
+    ${MYNAME} [-p pool1,pool2[, ...]] [-c critical] [-w warning]
+
+    -p comma-separated list of pools to check
+    -c critical in % (default: 80)
+    -w warning in % (default: 75)
+    without -p, ${MYNAME} checks all pools found by zpool list.
+
+" >/dev/stderr
+}
+
+if [ -r ${PLUGINS_DIR}/utils.sh ]; then
+    . ${PLUGINS_DIR}/utils.sh
+else
+    # XXX cannot use pre-defined ${ECHO}
+    echo "${SERVICE_NAME} UNKNOWN cannot find utils.sh in ${PLUGINS_DIR}"
+    echo "make sure ${MYNAME} is in Nagios plugins dir."
+    usage
+    exit 3
+fi
+
+# check_pool $zpool_name
+# exit with non-OK status or store (healthy) status line in the global STATUS.
+check_pool() {
+    local pool="$1"
+    local capacity=$( zpool list -H -o cap ${pool} 2>/dev/null | tr -d '%' )
+
+    if [ -z "${capacity}" ]; then
+        N_UNKNOWN=$(( $N_UNKNOWN + 1 ))
+    fi
+    if [ ${capacity} -ge ${CRITICAL} ]; then
+        N_CRITICAL=$(( $N_CRITICAL + 1 ))
+    fi
+    if [ ${capacity} -ge ${WARNING} ]; then
+        N_WARNING=$(( $N_WARNING + 1 ))
+    fi
+}
+
+CRITICAL=80
+WARNING=75
+while getopts :hp: ARG; do case ${ARG} in
+    # comma-separated list of pools
+    p) POOLS=${OPTARG};;
+    c) CRITICAL="${OPTARG}";;
+    w) WARNING="${OPTARG}";;
+    h) usage; exit ${STATE_UNKNOWN};;
+esac; done; shift $(( $OPTIND - 1 ))
+
+if [ -z "${POOLS}" ]; then
+    POOLS=$( zpool list -H -o name )
+else
+    POOLS=$( echo "${POOLS}" | tr "," "\n" )
+fi
+
+STATUS=""
+N_UNKNOWN=0
+N_CRITICAL=0
+N_WARNING=0
+for P in ${POOLS}; do
+    check_pool "${P}"
+done
+
+if [ ${N_CRITICAL} -gt 0 ]; then
+    STATUS_CODE=${STATE_CRITICAL}
+    STATUS="CRITICAL"
+elif [ ${N_WARNING} -gt 0 ]; then
+    STATUS_CODE=${STATE_WARNING}
+    STATUS="WARNING"
+elif [ ${N_UNKNOWN} -gt 0 ]; then
+    STATUS_CODE=${STATE_UNKNOWN}
+    STATUS="UNKNOWN"
+else
+    STATUS_CODE=${STATE_OK}
+    STATUS="OK"
+fi
+${ECHO} "${SERVICE_NAME} ${STATUS} ${N_CRITICAL} in critical, ${N_WARNING} in warning, ${N_UNKNOWN} in unknown"
+exit ${STATUS_CODE}

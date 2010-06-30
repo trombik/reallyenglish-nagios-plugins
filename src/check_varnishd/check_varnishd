@@ -1,0 +1,113 @@
+#!/bin/sh
+#
+# Copyright (C) 2009 by Tomoyuki Sakurai <cherry@trombik.org>
+# 
+# Permission to use, copy, modify, and distribute this software for any
+# purpose with or without fee is hereby granted, provided that the above
+# copyright notice and this permission notice appear in all copies.
+#                                                                                            
+# THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+# WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+# ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+# WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+# ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+# OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin
+MYNAME=$( basename $0 )
+SERVICE_NAME="VARNISHD"
+PLUGINS_DIR=$( dirname $0 )
+
+usage() {
+    echo "Usage:
+" >/dev/stderr
+}
+
+mylog() {
+    local text="$1"
+    if [ ! -z ${VERBOSE} ]; then
+        ${ECHO} "${text}" >/dev/stderr
+    fi
+}
+
+if [ -r ${PLUGINS_DIR}/utils.sh ]; then
+    . ${PLUGINS_DIR}/utils.sh
+else
+    # XXX cannot use pre-defined ${ECHO}
+    echo "${SERVICE_NAME} UNKNOWN cannot find utils.sh in ${PLUGINS_DIR}"
+    echo "make sure ${MYNAME} is in Nagios plugins dir."
+    usage
+    exit 3
+fi
+
+do_check() {
+    local varnishadm_opts=""
+    local out=""
+    local ret=""
+    local varnish_status_code=""
+    varnishadm_opts="${varnishadm_opts} -t ${TIMEOUT} -T ${HOST}:${PORT}"
+    if [ ! -z "${SHARED_SECRET}"]; then
+        varnishadm_opts="${varnishadm_opts} -S ${SHARED_SECRET}"
+    fi
+    mylog "executing varnishadm ${varnishadm_opts}"
+    out=$( echo status | varnishadm ${varnishadm_opts} | tr "\n" " ")
+    ret=$?
+    mylog "varnishadm returns: ${ret}"
+
+    # remove the banner
+    # "200 22 Child in state running"
+    out=$( echo "${out}" | sed -e "s/.*to close CLI session\.  //" )
+    mylog "output from varnishadm: ${out}"
+
+    varnish_status_code=$( echo "${out}" | cut -d " " -f 1 )
+    varnish_status_text=$( echo ${out} | sed -e "s/[0-9][0-9][0-9] [0-9]* Child in state //" )
+
+    if [ ${ret} -ne 0 ]; then
+        STATUS_CODE=${STATE_CRITICAL}
+        STATUS_TEXT="varnishadm failed"
+    elif [ ${varnish_status_code} -ne 200 ]; then
+        STATUS_CODE=${STATE_UNKNOWN}
+        STATUS_TEXT="varnish CLI command failed"
+    else
+        if [ x${varnish_status_text} != x"running" ]; then
+            STATUS_CODE=${STATE_CRITICAL}
+            STATUS_TEXT=${varnish_status_text}
+        else
+            STATUS_CODE=${STATE_OK}
+            STATUS_TEXT=${varnish_status_text}
+        fi
+    fi
+}
+
+STATUS_CODE=""
+STATUS_TEXT=""
+
+HOST=""
+TIMEOUT="10"
+SHARED_SECRET=""
+while getopts :hH:p:vS:t: ARG; do case ${ARG} in
+    h) usage; exit ${STATE_UNKNOWN};;
+    H) HOST=${OPTARG} ;;
+    S) SHARED_SECRET=${OPTARG} ;;
+    t) TIMEOUT=${OPTARG} ;;
+    p) PORT=${OPTARG} ;;
+    v) VERBOSE=y ;;
+esac; done; shift $(( $OPTIND - 1 ))
+
+if [ -z "${PORT}" ]; then
+    ${ECHO} "${SERVICE_NAME} UNKNOWN ERROR: option -p is required" >/dev/stderr
+    exit ${STATE_UNKNOWN}
+fi
+do_check
+
+STATUS=""
+case ${STATUS_CODE} in
+    ${STATE_UNKNOWN}) STATUS="UNKNOWN";;
+    ${STATE_CRITICAL}) STATUS="CRITICAL";;
+    ${STATE_WARNING}) STATUS="WARNING";;
+    ${STATE_OK}) STATUS="OK";;
+esac
+
+${ECHO} "${SERVICE_NAME} ${STATUS} ${STATUS_TEXT}"
+exit ${STATUS_CODE}
