@@ -57,7 +57,7 @@ check_pool() {
     if [ "$status" = "pool '${pool}' is healthy" ]; then
         RETURN_STATUS=0
     else
-        if ${ECHO} "$status" | grep -sq "state: ONLINE"; then
+        if echo "${status}" | grep -sq "The pool is formatted using an older on-disk format"; then
             RETURN_STATUS=0
         else
             RETURN_STATUS=1
