@@ -18,9 +18,11 @@ PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin
 MYNAME=$( basename $0 )
 SERVICE_NAME="%%SERVICE_NAME%%"
 PLUGINS_DIR=$( dirname $0 )
+VERSION="0.1"
 
 usage() {
-    echo "Usage:
+    echo "${MYNAME} version ${VERSION}
+    Usage:
 " >/dev/stderr
 }
 
@@ -43,6 +45,8 @@ fi
 do_check() {
     # write your chech code here
     # set STATUS_CODE and STATUS_TEXT, then return
+    STATUS_CODE=${STATE_UNKNOWN}
+    STATUS_TEXT="bug: please implement do_check!"
 }
 
 HOST=""
