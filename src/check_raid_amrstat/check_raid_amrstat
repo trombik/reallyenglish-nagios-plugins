@@ -1,0 +1,182 @@
+#!/usr/bin/perl
+
+#
+# $Id$
+#
+
+#######################################
+### check_raid_amrstat.pl    ##########
+###  hacked together by:     ##########
+###     Steve Polyack        ##########
+### check_raid_megarc.pl     ##########
+###  by Brian A. Seklecki for #########
+###   Collaborative Fusion, Inc. ######
+#######################################
+### This program parses the output ####
+### of ports/sysutils/amrstat #########
+#######################################
+
+#/*
+# * Copyright (c) 2006-2007 Collaborative Fusion, Inc.  All rights reserved.
+# * 
+# * Developed by: Collaborative Fusion, Inc.
+# *                                                     http://www.collaborativefusion.com
+# * 
+# * Permission is hereby granted, free of charge, to any person obtaining a copy
+# * of this software and associated documentation files (the "Software"), to
+# * deal with the Software without restriction, including without limitation the
+# * rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+# * sell copies of the Software, and to permit persons to whom the Software is
+# * furnished to do so, subject to the following conditions:
+# *   1. Redistributions of source code must retain the above copyright notice,
+# *      this list of conditions and the following disclaimers.
+# *   2. Redistributions in binary form must reproduce the above copyright
+# *      notice, this list of conditions and the following disclaimers in the
+# *      documentation and/or other materials provided with the distribution.
+# *   3. All advertising materials mentioning features or use of this software
+# *      must display the following acknowledgement: This product includes 
+# *      software developed by Collaborative Fusion, Inc.
+# *   4. Neither the name of Collaborative Fusion, Inc. or any of its employees
+# *      may be used to endorse or promote products derived from this Software
+# *      without specific prior written permission.
+#
+# * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL 
+# * COLLABORATIVE FUSION, INC. BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+# * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+# * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+# * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+# * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF 
+# * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# */
+#
+#/*
+# * This code was written under funding by Collaborative Fusion, Inc..
+# */
+
+use warnings;
+use strict;
+#use Switch;
+
+my %NAGIOS_API_ECODES = ( 'OK' => 0, 'WARNING' => 1, 'CRITICAL' => 2, 'UNKNOWN' => 3 );
+
+
+my $_strMegarcPath = "/usr/local/sbin/amrstat";
+
+# Note, I don't want to include/depend getopt:: yet because
+# I once read somewhere (msdn?) that code should be 
+# efficient if at all possible ~BAS
+
+
+my $_intLDCount = 0;
+my $_intDegCount = 0;
+my @_arrLDStatus;
+my $_intFailedComponentCount = 0;
+my @_arrFailedComponent;
+my $_boolVerbose = 0;
+
+my $USAGE = "Usage:
+$0 [-h | <intAdapterNumber =~ [0-9]?> [-v]\n";
+
+if (@ARGV < 1) {
+	print $USAGE;
+	exit $NAGIOS_API_ECODES{UNKNOWN};
+}
+	
+
+if ($ARGV[0] !~ m/^[0-9]?$/) {
+	print $USAGE;
+	exit $NAGIOS_API_ECODES{UNKNOWN};
+}
+
+# Check $ARGV[] size before trying to evaluate
+# $ARGV[1] otherwise Perl complains like a little wench
+
+if (@ARGV > 1) { 
+
+	if ($ARGV[1] =~ m/^\-v$/) {
+		$_boolVerbose = 1;
+	}
+}
+
+# This abosolute path might need [to be] adjusted
+# Gee I wonder if it should be a variable you declare
+
+if (! open(AMRSTAT, "$_strMegarcPath -g -c $ARGV[0] |") ) {
+	die "Cannot locate amrstat(8) binary in \$PATH\n";
+	exit $NAGIOS_API_ECODES{UNKNOWN}; 
+}
+
+# NOTE: The above could be adjusted to use "-l " thus allowing $ARGV[1] to specify a 
+# check of a specific logical drive...perhaps a future feature
+
+my $_intBus = 0;
+my $_intID = 0;
+
+while (my $line = <AMRSTAT>) {
+
+	if ($line =~ m/^Logical\ volume\ ([0-9]+)\:	(optimal|degraded)/) {
+		$_arrLDStatus[$_intLDCount][0] = $1;
+		$_arrLDStatus[$_intLDCount][1] = $2;
+		if ($2 =~ "degraded") { $_intDegCount++; }
+		$_intLDCount++;
+		
+	} elsif ($line =~ m/^Physical drive (\d{1,1}):(\d{1,1})	(online|failed)/) {
+		$_intBus = $1;
+		$_intID = $2;
+
+		if ($3 =~ "failed") { 
+			$_arrFailedComponent[$_intFailedComponentCount][0] = $_intBus;
+			$_arrFailedComponent[$_intFailedComponentCount][1] = $_intID;
+			$_intFailedComponentCount++;
+		}
+	}
+	
+
+
+}
+close(AMRSTAT);
+
+# Goal:  The make the output about as easily parseable as 
+# AMI/LSI/Dell have made that of megarc(8)
+
+my $message;
+
+if ($_intLDCount < 1 ) {
+	print "AMRSTAT UNKNOWN  No logical drives found";
+    exit $NAGIOS_API_ECODES{UNKNOWN};
+} else { 
+	$message .= "$_intLDCount LDs; $_intDegCount degraded";
+	if ($_boolVerbose) { 
+		$message .= "; $_intFailedComponentCount components failed";
+	}
+	$message .= "::";
+}
+
+my $_intCount = 0;
+
+foreach (@_arrLDStatus) { 
+	$message .= "(LD$_arrLDStatus[$_intCount][0] ";
+	$message .= "Status: $_arrLDStatus[$_intCount][1] )";
+	$_intCount++;
+}
+
+if ($_boolVerbose && @_arrFailedComponent > 0) {
+	my $_intBadCounter = 0;
+	foreach (@_arrFailedComponent) {
+		#print "DEBUG: $_intBadCounter\n";
+		$message .= " Drive @ Bus[$_arrFailedComponent[$_intBadCounter][0]]-ID[$_arrFailedComponent[$_intBadCounter][1]] OFFLINE!";
+		$_intBadCounter++;
+	}
+}
+
+
+if ($_intDegCount > 0) {
+    print "AMRSTAT CRITICAL $message";
+	 exit $NAGIOS_API_ECODES{CRITICAL};
+} else {
+    print "AMRSTAT OK $message";
+	 exit $NAGIOS_API_ECODES{OK};
+}
