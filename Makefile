@@ -1,5 +1,5 @@
-VERSION=	0.3
-DESTDIR?=	/usr/local/libexec/nagios
+VERSION=	0.4
+DESTDIR?=	/usr/local
 SRC=		src
 INSTALL?=	install -C -o root -g wheel -m 0755
 RELEASE_NAME=	reallyenglish-nagios-plugins-${VERSION}
@@ -18,7 +18,7 @@ all:
 
 install:
 .for p in ${PLUGINS}
-	${INSTALL} ${SRC}/${p}/${p} ${DESTDIR}
+	${INSTALL} ${SRC}/${p}/${p} ${DESTDIR}/libexec/nagios
 .endfor
 
 clean-release:
