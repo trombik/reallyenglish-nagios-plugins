@@ -1,0 +1,197 @@
+#!/usr/bin/perl 
+#===============================================================================
+#
+#         FILE:  check_dns_soa.pl
+#
+#        USAGE:  ./check_dns_soa.pl  
+#
+#       AUTHOR:  Tomoyuki Sakurai, <tomoyukis@reallyenglish.com>
+#      CREATED:  04/21/11 16:52:27
+#===============================================================================
+
+use strict;
+use warnings;
+use Nagios::Plugin;
+use Nagios::Plugin::Functions;
+use File::Basename;
+use Net::DNS;
+use Net::IP;
+
+# TODO remove List::MoreUtils
+use List::MoreUtils qw{ uniq };
+
+our $VERSION = 0.01;
+
+my $p = Nagios::Plugin->new(
+    usage   => "Usage: %s [ -v | --verbose ] -H <host> --domain <domain>\n",
+    version => $VERSION,
+    plugin  => basename $0,
+    timeout => 10,
+);
+
+$p->add_arg(
+    spec    => 'verbose|v',
+    help    => '-v, --verbose be verbose',
+    default => 0,
+);
+
+$p->add_arg(
+    spec    => 'host|hostname|H=s',
+    help    => '-H, --host=<host>',
+    required => 1,
+);
+
+$p->add_arg(
+    spec    => 'domain=s',
+    help    => '--domain <domain>',
+    required => 1,
+);
+
+$p->add_arg(
+    spec    => 'servers|s=s',
+    help    => '--servers <host>[,<host2>[,...]] comma-separated list of servers'
+);
+$p->getopts;
+
+# this resolver uses system default resolver, i.e. /etc/resolv.conf
+my $resolver = Net::DNS::Resolver->new();
+
+sub lookup {
+    my $name = shift;
+    my ($rr, $dummy);
+    my $query = $resolver->search($name);
+    if ($query) {
+        ($rr, $dummy) = $query->answer;
+        if ($dummy) {
+            warn "lookup(): multiple RRs returned\n";
+        }
+        if ($rr->type ne 'A') {
+            warn "lookup(): not A RR returned\n";
+            return;
+        }
+        return $rr->address;
+    }
+    return;
+}
+
+sub get_soa {
+    my $address = shift;
+    my $tmp_resolver = Net::DNS::Resolver->new(
+        nameservers => [ $address ],
+        recurse     => 0,
+    );
+    my $query = $tmp_resolver->query($p->opts->domain, 'SOA');
+    if ($query) {
+        my ($soa) = grep { $_->type eq "SOA" } $query->answer;
+        return $soa->serial;
+    } else {
+        nagios_exit(CRITICAL, sprintf "no SOA returned from %s", $address);
+    }
+}
+
+sub get_additional_targets {
+    my @hosts;
+    if ($p->opts->servers) {
+        @hosts = split /,/, $p->opts->servers;
+    } else {
+        # ask the target
+        # this resolver ask the target DNS server
+        my $resolver_norec = Net::DNS::Resolver->new(
+            nameservers => [ $p->opts->host ],
+            recurse     => 0,
+        );
+        my $query = $resolver_norec->query($p->opts->domain, "NS");
+        nagios_exit(CRITICAL, "failed to query %s to %s", $p->opts->domain, $p->opts->host)
+            unless $query;
+        foreach my $rr (grep { $_->type eq 'NS' } $query->answer) {
+            push @hosts, $rr->nsdname;
+        }
+    }
+    return @hosts;
+}
+
+my %soa_of;
+my @target_hosts = uniq($p->opts->host, get_additional_targets());
+foreach my $host (@target_hosts) {
+    my $soa;
+    my $address = Net::IP->new($host);
+    if ($address) {
+        # $host is IP address
+        $soa = get_soa($address->ip);
+    } else {
+        # got hostname
+        $soa = get_soa(lookup($host));
+    }
+    $soa_of{$host} = $soa;
+}
+my $detail = join ", ", map { join ":", $_, $soa_of{$_} } keys %soa_of;
+my $number_of_different_soa_rr = scalar uniq(values %soa_of);
+if ($number_of_different_soa_rr > 1) {
+    nagios_exit(CRITICAL, sprintf "SOA record mismatch: %s", $detail);
+} else {
+    nagios_exit(OK, sprintf "all SOA agreed: %s", $detail);
+}
+
+__END__
+
+=head1 NAME
+
+check_dns_soa - check SOA serial number
+
+=head1 SYNOPSIS
+
+    check_dns_soa -H ns1.example.org --domain example.org
+
+    check_dns_soa -H ns1.example.org --domain example.org \
+        --servers ns2.example.org,ns3.example.org
+
+=head1 DESCRIPTION
+
+
+
+=head1 REQUIREMENTS
+
+
+
+=head1 FUNCTIONS
+
+
+
+=head1 OPTIONS
+
+
+
+=head1 METHODS
+
+
+
+=head1 BUGS AND LIMITATIONS
+
+
+
+=head1 SEE ALSO
+
+
+
+=head1 AUTHOR
+
+Tomoyuki Sakurai <tomoyukis@reallyenglish.com>
+
+=head1 COPYRIGHT AND LICENSE
+
+Copyright (C) 2011 by Tomoyuki Sakurai
+
+Permission to use, copy, modify, and distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+=cut
+
