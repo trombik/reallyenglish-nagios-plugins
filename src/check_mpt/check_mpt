@@ -9,6 +9,20 @@ use IPC::Cmd qw{ can_run run };
 
 our $VERSION = 1.0;
 
+my $p = Nagios::Plugin->new(
+    usage   => "Usage: %s - check mpt(4) status with mptutil(8)",
+    plugin  => basename($PROGRAM_NAME),
+    timeout => 10,
+);
+
+$p->add_arg(
+    spec    => 'verbose|v',
+    help    => "--verbose, -v\n\tBe verbose",
+    default => 0,
+);
+
+$p->getopts;
+
 sub mydebug {
     my $text = shift;
     chomp $text;
@@ -77,20 +91,6 @@ sub check_mpt {
         })->(@_);
     }
 }
-
-my $p = Nagios::Plugin->new(
-    usage   => "Usage: %s - check mpt(4) status with mptutil(8)",
-    plugin  => basename($PROGRAM_NAME),
-    timeout => 10,
-);
-
-$p->add_arg(
-    spec    => 'verbose|v',
-    help    => "--verbose, -v\n\tBe verbose",
-    default => 0,
-);
-
-$p->getopts;
 
 my $result = check_mpt();
 if ($result->('is_ok')) {
