@@ -1,4 +1,4 @@
-VERSION=	0.4
+VERSION=	0.5
 DESTDIR?=	/usr/local
 SRC=		src
 INSTALL?=	install -C -o root -g wheel -m 0755
@@ -12,7 +12,8 @@ PLUGINS=	check_ciss_status \
 	check_varnishd \
 	check_zfs_capacity \
 	check_raid_amrstat \
-	check_zfs_status
+	check_zfs_status \
+	check_mpt
 
 all:
 

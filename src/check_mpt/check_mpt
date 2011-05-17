@@ -1,0 +1,100 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+use Nagios::Plugin;
+use File::Basename;
+use English qw( -no_match_vars );
+use IPC::Cmd qw{ can_run run };
+
+our $VERSION = 1.0;
+
+sub mydebug {
+    my $text = shift;
+    chomp $text;
+    print STDERR "debug: $text\n" if $p->opts->verbose;
+    return;
+}
+
+sub check_mpt {
+    my $cmd = can_run('mptutil');
+    nagios_exit( UNKNOWN, 'cannot execute mptutil' ) unless $cmd;
+
+    mydebug "running $cmd show volumes";
+    # XXX multiple mpt(4)? 
+    my ( $success, $error_code, $full_buf, $stdout_buf, $stderr_buf )
+        = run( command => "$cmd show volumes");
+    our $stdout_text = join q{}, @{$stdout_buf};
+    our $stderr_text = join q{}, @{$stderr_buf};
+    our $full_text   = join q{}, @{$full_buf};
+
+    mydebug("STDOUT: $stdout_text");
+    mydebug("STDERR: $stderr_text");
+    # XXX mptutil(8) returns zero on error
+    if (!$success || $stderr_text =~ /mptutil: mpt_open: Permission denied/) {
+        $p->nagios_exit( UNKNOWN, sprintf 'failed to execute mptutil: %s', $full_text );
+    }
+
+    my @lines = split /\n/, $stdout_text;
+    our %volume_status_of;
+    foreach my $line (@lines) {
+        mydebug $line;
+        # mpt0 Volumes:
+        #  Id     Size    Level   Stripe  State  Write-Cache  Name
+        #     0 (  466G) RAID-1          OPTIMAL   Enabled
+        next if $line !~ /
+            ^\s*
+            (\d+)           # Id
+            \s*
+            \(\s*\d+[GM]\)  # Size
+            \s*
+            RAID-\d+        # Level
+            \s+             # XXX unknown
+            (\S+)           # state
+            \s+
+            \S+             # Write-Cache
+            .*              # Name
+            /xms;
+        my ($id, $status) = ($1, $2);
+        mydebug sprintf 'ID = %s, status = %s', $id, $status;
+        $volume_status_of{$id} = $status;
+    }
+    return sub {
+        my $arg = shift;
+        return ({
+            is_ok   => sub {
+                # XXX rebuild?
+                my @bad_volumes = grep { $_ ne 'OPTIMAL' } values %volume_status_of;
+                return scalar @bad_volumes ? 0 : 1;
+            },
+            detail  => sub {
+                my $text = join ', ', map { sprintf 'volume ID %d is %s', $_, $volume_status_of{$_} }
+                    sort keys %volume_status_of;
+                return $text;
+            },
+        }->{$arg} || sub {
+            $p->nagios_exit( UNKNOWN, "Unknown request in check_mpt(): $arg" )
+        })->(@_);
+    }
+}
+
+my $p = Nagios::Plugin->new(
+    usage   => "Usage: %s - check mpt(4) status with mptutil(8)",
+    plugin  => basename($PROGRAM_NAME),
+    timeout => 10,
+);
+
+$p->add_arg(
+    spec    => 'verbose|v',
+    help    => "--verbose, -v\n\tBe verbose",
+    default => 0,
+);
+
+$p->getopts;
+
+my $result = check_mpt();
+if ($result->('is_ok')) {
+    $p->nagios_exit( OK, sprintf 'all volumes are OK: %s', $result->('detail') );
+} else {
+    $p->nagios_exit( CRITICAL, sprintf 'found non-OK volume(s): %s', $result->('detail') );
+}
