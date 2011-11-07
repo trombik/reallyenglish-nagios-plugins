@@ -32,12 +32,14 @@ sub mydebug {
 
 sub check_mpt {
     my $cmd = can_run('mptutil');
+    my $sudo = can_run('sudo');
     nagios_exit( UNKNOWN, 'cannot execute mptutil' ) unless $cmd;
+    nagios_exit( UNKNOWN, 'cannot execute sudo' ) unless $sudo;
 
-    mydebug "running $cmd show volumes";
+    mydebug "running $sudo $cmd show volumes";
     # XXX multiple mpt(4)? 
     my ( $success, $error_code, $full_buf, $stdout_buf, $stderr_buf )
-        = run( command => "$cmd show volumes");
+        = run( command => "$sudo $cmd show volumes");
     our $stdout_text = join q{}, @{$stdout_buf};
     our $stderr_text = join q{}, @{$stderr_buf};
     our $full_text   = join q{}, @{$full_buf};
@@ -46,7 +48,7 @@ sub check_mpt {
     mydebug("STDERR: $stderr_text");
     # XXX mptutil(8) returns zero on error
     if (!$success || $stderr_text =~ /mptutil: mpt_open: Permission denied/) {
-        $p->nagios_exit( UNKNOWN, sprintf 'failed to execute mptutil: %s', $full_text );
+        $p->nagios_exit( UNKNOWN, sprintf 'check_mpt: failed to execute $sudo $cmd, %s', $full_text );
     }
 
     my @lines = split /\n/, $stdout_text;
