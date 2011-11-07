@@ -30,8 +30,8 @@ else
     exit 3
 fi
 
-# -p is needed to fail when "permission denied"
-CISS_STATUS=`cciss_vol_status -p /dev/ciss0 2>&1`
+# --persnickety is needed to fail (CRITICAL) when "permission denied"
+CISS_STATUS=`cciss_vol_status --persnickety /dev/ciss0 2>&1`
 RETURN_STATUS=$?
 
 if [ ${RETURN_STATUS} -ne 0 ]; then
