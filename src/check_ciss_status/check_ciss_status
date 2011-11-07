@@ -31,7 +31,7 @@ else
 fi
 
 # --persnickety is needed to fail (CRITICAL) when "permission denied"
-CISS_STATUS=`cciss_vol_status --persnickety /dev/ciss0 2>&1`
+CISS_STATUS=`sudo cciss_vol_status --persnickety /dev/ciss0 2>&1`
 RETURN_STATUS=$?
 
 if [ ${RETURN_STATUS} -ne 0 ]; then
