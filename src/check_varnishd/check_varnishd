@@ -45,30 +45,24 @@ do_check() {
     local varnishadm_opts=""
     local out=""
     local ret=""
-    local varnish_status_code=""
     varnishadm_opts="${varnishadm_opts} -t ${TIMEOUT} -T ${HOST}:${PORT}"
     if [ ! -z "${SHARED_SECRET}"]; then
         varnishadm_opts="${varnishadm_opts} -S ${SHARED_SECRET}"
     fi
-    mylog "executing varnishadm ${varnishadm_opts}"
-    out=$( echo status | varnishadm ${varnishadm_opts} | tr "\n" " ")
+    mylog "executing varnishadm ${varnishadm_opts} status"
+    out=$( varnishadm ${varnishadm_opts} status 2>/dev/null | tr "\n" " ")
     ret=$?
     mylog "varnishadm returns: ${ret}"
 
     # remove the banner
-    # "200 22 Child in state running"
-    out=$( echo "${out}" | sed -e "s/.*to close CLI session\.  //" )
+    # "Child in state running"
     mylog "output from varnishadm: ${out}"
 
-    varnish_status_code=$( echo "${out}" | cut -d " " -f 1 )
-    varnish_status_text=$( echo ${out} | sed -e "s/[0-9][0-9][0-9] [0-9]* Child in state //" )
+    varnish_status_text=$( echo ${out} | sed -e "s/Child in state //" )
 
     if [ ${ret} -ne 0 ]; then
         STATUS_CODE=${STATE_CRITICAL}
         STATUS_TEXT="varnishadm failed"
-    elif [ ${varnish_status_code} -ne 200 ]; then
-        STATUS_CODE=${STATE_UNKNOWN}
-        STATUS_TEXT="varnish CLI command failed"
     else
         if [ x${varnish_status_text} != x"running" ]; then
             STATUS_CODE=${STATE_CRITICAL}

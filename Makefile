@@ -1,4 +1,4 @@
-VERSION=	0.9
+VERSION=	1.0
 DESTDIR?=	/usr/local
 SRC=		src
 INSTALL?=	install -C -o root -g wheel -m 0755
