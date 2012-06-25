@@ -46,7 +46,7 @@ do_check() {
     local out=""
     local ret=""
     varnishadm_opts="${varnishadm_opts} -t ${TIMEOUT} -T ${HOST}:${PORT}"
-    if [ ! -z "${SHARED_SECRET}"]; then
+    if [ ! -z "${SHARED_SECRET}" ]; then
         varnishadm_opts="${varnishadm_opts} -S ${SHARED_SECRET}"
     fi
     mylog "executing varnishadm ${varnishadm_opts} status"
